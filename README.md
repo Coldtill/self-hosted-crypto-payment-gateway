@@ -35,7 +35,7 @@ A self-hosted crypto payment gateway removes the middleman:
 - **Automatic sweeps** to your cold wallet when the value justifies the gas, with per-network rules and fee caps. Tron sweeps can rent energy instead of burning TRX.
 - **Payouts and refunds** from a small hot wallet, with an address book, limits and two-factor approval for anything large.
 - **Many shops on one server:** each project has its own wallets, API keys, webhooks, branding and checkout domain.
-- **For developers:** a small REST API, signed webhooks, OpenAPI 3.1, a TypeScript SDK and a WooCommerce plugin.
+- **For developers:** a small REST API, signed webhooks, OpenAPI 3.1, a TypeScript SDK and a [WooCommerce plugin](https://github.com/Coldtill/woocommerce-crypto-payment-gateway).
 
 ![Checkout: choose a network and coin, then scan the QR code](https://coldtill.com/img/checkout-pay.webp)
 
