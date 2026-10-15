@@ -1,8 +1,9 @@
 # Coldtill: self-hosted crypto payment gateway
 
-**Coldtill is a self-hosted crypto payment gateway.** Accept Bitcoin, Ethereum, USDT, USDC, Solana, Tron, Base,
-Polygon and BNB Chain on your own Linux server. Every payment goes to your own cold wallet. There's no sign-up, no KYC or
-KYB, no approval queue and no custody.
+**Coldtill is a self-hosted crypto payment gateway that accepts 200+ coins on 35+ chains.** Take Bitcoin, Ethereum,
+USDT, USDC, Solana, Tron, Base, Polygon and BNB Chain directly on your own Linux server, and XRP, TON, Sui, Cardano,
+Zcash, memecoins and more through auto-convert, settled to you as USDC or USDT. Every payment goes to your own cold
+wallet. There's no sign-up, no KYC or KYB, no approval queue and no custody.
 
 This repository hosts the **Free edition**: the install script, Docker image files, static binaries and checksums.
 Install it with one command:
