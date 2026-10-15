@@ -1,0 +1,100 @@
+# Coldtill: run `coldtill init` (or install.sh) in this directory first to create .env and secrets/.
+#
+# Only the sweeper and payouts containers can read secrets/ (the passphrase-protected hot-wallet identity).
+# The API, which faces the internet through Caddy, never holds a private key.
+
+# Pinned so the volumes (deploy_pgdata, …) stay attached if this folder is moved or renamed.
+name: ${COLDTILL_COMPOSE_PROJECT:-deploy}
+
+x-coldtill: &coldtill
+  image: ${COLDTILL_IMAGE:-coldtill:local}
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: coldtill
+      POSTGRES_DB: coldtill
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run coldtill init first}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coldtill -d coldtill"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    <<: *coldtill
+    command: ["api"]
+    environment:
+      COLDTILL_LISTEN: ":8080"
+      COLDTILL_TRUST_PROXY: "true"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/coldtill", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  watcher:
+    <<: *coldtill
+    command: ["watcher"]
+
+  sweeper:
+    <<: *coldtill
+    command: ["sweeper"]
+    user: "${COLDTILL_UID:-65532}:${COLDTILL_GID:-65532}"
+    environment:
+      COLDTILL_AGE_IDENTITY_FILE: /secrets/coldtill-identity.age
+      COLDTILL_HOT_PASSPHRASE_FILE: /secrets/hot_passphrase
+      COLDTILL_HOT_PASSPHRASE: ${COLDTILL_HOT_PASSPHRASE:-} # optional: supply at start-up instead of storing it
+      COLDTILL_SECRET: "" # key-holding containers don't need the API's sealing key
+    volumes:
+      - ./secrets:/secrets:ro
+
+  payouts:
+    <<: *coldtill
+    command: ["payouts"]
+    user: "${COLDTILL_UID:-65532}:${COLDTILL_GID:-65532}"
+    environment:
+      COLDTILL_AGE_IDENTITY_FILE: /secrets/coldtill-identity.age
+      COLDTILL_HOT_PASSPHRASE_FILE: /secrets/hot_passphrase
+      COLDTILL_HOT_PASSPHRASE: ${COLDTILL_HOT_PASSPHRASE:-} # optional: supply at start-up instead of storing it
+      COLDTILL_SECRET: "" # key-holding containers don't need the API's sealing key
+    volumes:
+      - ./secrets:/secrets:ro
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${COLDTILL_HTTP_PORT:-80}:80"
+      - "${COLDTILL_HTTPS_PORT:-443}:443"
+    environment:
+      COLDTILL_CADDY_ADDRESS: ${COLDTILL_CADDY_ADDRESS:-http://localhost:80}
+      COLDTILL_TRUSTED_PROXIES: ${COLDTILL_TRUSTED_PROXIES:-private_ranges}
+      COLDTILL_CLIENT_IP_HEADER: ${COLDTILL_CLIENT_IP_HEADER:-X-Forwarded-For}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

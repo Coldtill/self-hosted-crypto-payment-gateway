@@ -1,0 +1,24 @@
+{
+	admin off
+	servers {
+		# Proxies in front of Caddy (for example Cloudflare's ranges) whose client-IP headers are believed.
+		trusted_proxies static {$COLDTILL_TRUSTED_PROXIES:private_ranges}
+		client_ip_headers {$COLDTILL_CLIENT_IP_HEADER:X-Forwarded-For}
+	}
+}
+
+# A bare domain (pay.example.com) gets an automatic Let's Encrypt certificate.
+{$COLDTILL_CADDY_ADDRESS} {
+	encode zstd gzip
+	request_body {
+		max_size 4MB
+	}
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+	reverse_proxy api:8080 {
+		# Coldtill reads the rightmost X-Forwarded-For entry, so send exactly one: the resolved client IP.
+		header_up X-Forwarded-For {client_ip}
+	}
+}
