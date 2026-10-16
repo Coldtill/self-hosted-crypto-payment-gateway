@@ -94,6 +94,23 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
+  # coldtill-updater: one-click updates from the dashboard (see updater.sh). install.sh turns it on with
+  # COMPOSE_PROFILES=updater; without that profile it never starts. It is the only service with the Docker
+  # socket, it publishes no port, and the API reaches it on the internal network.
+  updater:
+    image: docker:27-cli
+    profiles: ["updater"]
+    restart: unless-stopped
+    environment:
+      COLDTILL_DIR: ${COLDTILL_DIR:-/opt/coldtill}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${COLDTILL_DIR:-/opt/coldtill}:${COLDTILL_DIR:-/opt/coldtill}
+    entrypoint: ["/bin/sh", "${COLDTILL_DIR:-/opt/coldtill}/updater.sh"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
 volumes:
   pgdata:
   caddy_data:

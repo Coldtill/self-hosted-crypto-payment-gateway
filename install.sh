@@ -87,8 +87,74 @@ fetch() {
   say "Checksum OK ($got)"
 }
 
+# set_env KEY VALUE FILE replaces the KEY= line or appends one. It rewrites the file in place, so its owner and
+# mode stay as they were.
+set_env() {
+  local key=$1 val=$2 file=$3 t
+  t=$(mktemp)
+  { grep -v "^${key}=" "$file" || true; printf '%s=%s\n' "$key" "$val"; } > "$t"
+  cat "$t" > "$file"
+  rm -f "$t"
+}
+
+# ensure_updater sets up one-click updates from the dashboard: the updater service in docker-compose.yml, its
+# script, a secret the API and the updater share, and updater.env. The install token goes only in updater.env,
+# which is readable by root and the updater container alone; .env is loaded by every Coldtill container,
+# including the public API.
+ensure_updater() {
+  local edition=$1 dc=$2 secret prev_token="" profiles
+  secret=$(sed -n 's/^COLDTILL_UPDATE_SECRET=//p' .env | tail -n 1)
+  [[ "$secret" =~ ^[0-9a-f]{64}$ ]] || secret=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+  set_env COLDTILL_DIR "$PWD" .env
+  set_env COLDTILL_UPDATER_URL "http://updater:8090" .env
+  set_env COLDTILL_UPDATE_SECRET "$secret" .env
+  # An earlier draft of this script put the install token in .env; move it out.
+  prev_token=$(sed -n 's/^COLDTILL_INSTALL_TOKEN=//p' .env | tail -n 1)
+  if grep -q '^COLDTILL_INSTALL_TOKEN=' .env; then
+    local t; t=$(mktemp); grep -v '^COLDTILL_INSTALL_TOKEN=' .env > "$t" || true; cat "$t" > .env; rm -f "$t"
+  fi
+  profiles=$(sed -n 's/^COMPOSE_PROFILES=//p' .env | tail -n 1)
+  case ",$profiles," in *,updater,*) ;; ,,) set_env COMPOSE_PROFILES updater .env ;; *) set_env COMPOSE_PROFILES "$profiles,updater" .env ;; esac
+
+  [ -f updater.env ] && [ -z "$prev_token" ] && prev_token=$(sed -n 's/^COLDTILL_INSTALL_TOKEN=//p' updater.env | tail -n 1)
+  ( umask 077
+    { echo "# Read only by the updater container. Keep this file private."
+      echo "COLDTILL_EDITION=$edition"
+      echo "COLDTILL_UPDATE_SECRET=$secret"
+      if [ "$edition" != free ] && [ -n "${token:-$prev_token}" ]; then echo "COLDTILL_INSTALL_TOKEN=${token:-$prev_token}"; fi
+    } > updater.env.tmp )
+  chown 0:0 updater.env.tmp
+  chmod 600 updater.env.tmp
+  mv -f updater.env.tmp updater.env
+
+  if curl -fsS --proto '=https' --tlsv1.2 -o updater.sh.tmp "$SITE/deploy/updater.sh"; then
+    chown 0:0 updater.sh.tmp
+    chmod 755 updater.sh.tmp
+    mv -f updater.sh.tmp updater.sh
+  else
+    rm -f updater.sh.tmp
+    say "Could not download the one-click updater; updates still work by re-running this script"
+  fi
+
+  # Installs from before one-click updates have a compose file without the updater service.
+  if ! grep -q '^  updater:' docker-compose.yml; then
+    curl -fsS --proto '=https' --tlsv1.2 -o compose.new.tmp "$SITE/deploy/docker-compose.yml" || { rm -f compose.new.tmp; return 0; }
+    awk '/^  # coldtill-updater:/ { on = 1 } on && /^volumes:/ { exit } on { print }' compose.new.tmp > updater.block.tmp
+    awk -v block=updater.block.tmp '
+      /^volumes:/ && !done { while ((getline line < block) > 0) print line; print ""; done = 1 }
+      { print }' docker-compose.yml > docker-compose.yml.tmp
+    if grep -q '^  updater:' docker-compose.yml.tmp && $dc -f docker-compose.yml.tmp config -q 2>/dev/null; then
+      cat docker-compose.yml.tmp > docker-compose.yml
+      say "Added the one-click updater to docker-compose.yml"
+    else
+      say "Could not add the updater to your docker-compose.yml automatically; updates still work by re-running this script"
+    fi
+    rm -f compose.new.tmp updater.block.tmp docker-compose.yml.tmp
+  fi
+}
+
 main() {
-  local edition="" version=latest dir=/opt/coldtill mode=testnet site_url="" start=1 download_only=0 kind=image arch=""
+  local edition="" version=latest dir=/opt/coldtill mode=testnet site_url="" start=1 download_only=0 kind=image arch="" from_updater=0
   token="${COLDTILL_INSTALL_TOKEN:-}"
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -99,6 +165,7 @@ main() {
       --mode) mode="${2:-}"; shift 2 ;;
       --site-url) site_url="${2:-}"; shift 2 ;;
       --no-start) start=0; shift ;;
+      --from-updater) from_updater=1; shift ;;
       --download-only) download_only=1; shift ;;
       --kind) kind="${2:-}"; shift 2 ;;
       --arch) arch="${2:-}"; shift 2 ;;
@@ -208,6 +275,7 @@ main() {
 
   if grep -q '^COLDTILL_IMAGE=' .env; then sed -i "s|^COLDTILL_IMAGE=.*|COLDTILL_IMAGE=$image|" .env
   else printf '# Image loaded by install.sh\nCOLDTILL_IMAGE=%s\n' "$image" >> .env; fi
+  ensure_updater "$edition" "$dc"
   chown "$APP_UID:$APP_UID" .env
   chmod 600 .env
   chmod 700 secrets
@@ -217,13 +285,25 @@ main() {
     return
   fi
   say "Starting Coldtill ${release:-$version}"
-  $dc up -d --no-build
+  if [ "$from_updater" = 1 ]; then
+    # Run by the updater container: restarting it now would stop this script halfway through the upgrade.
+    local services
+    services=$($dc config --services | grep -vx updater)
+    # shellcheck disable=SC2086 # one service name per word
+    $dc up -d --no-build $services
+  else
+    $dc up -d --no-build
+  fi
 
   local url
   url=$(sed -n 's/^COLDTILL_SITE_URL=//p' .env)
   echo
   echo "Coldtill ${edition^} ${release:-} is starting at $url"
   echo "Open it to create the root account, then enable two-factor authentication."
+  if [[ $url =~ ^https?://[^/]+/. ]]; then
+    echo "Coldtill listens on http://127.0.0.1:8080 for your reverse proxy. Point its location for that path there:"
+    echo "https://coldtill.com/docs/guides/domains-and-dashboard/#run-coldtill-under-a-path-of-another-site"
+  fi
   echo "Logs: cd $dir && $dc logs -f    Stop: cd $dir && $dc down"
   echo "Back up $dir/.env and $dir/secrets/ somewhere safe (offline)."
 }

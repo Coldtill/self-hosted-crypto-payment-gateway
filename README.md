@@ -68,7 +68,7 @@ first. Useful options:
 | Option | What it does |
 | --- | --- |
 | `--mode mainnet --site-url https://pay.example.com` | Go live on mainnet at your own domain (testnet is the default) |
-| `--version v1.1.0` | Install a specific release |
+| `--version v1.2.0` | Install a specific release |
 | `--download-only` | Just download and verify the file, without installing |
 
 The [self-hosting guide](https://coldtill.com/docs/self-hosting/) covers choosing a server, DNS, keeping the
