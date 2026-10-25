@@ -304,7 +304,7 @@ main() {
     echo "Coldtill listens on http://127.0.0.1:8080 for your reverse proxy. Point its location for that path there:"
     echo "https://coldtill.com/docs/guides/domains-and-dashboard/#run-coldtill-under-a-path-of-another-site"
   fi
-  echo "Logs: cd $dir && $dc logs -f    Stop: cd $dir && $dc down"
+  echo "Logs: cd $dir && sudo $dc logs -f    Stop: cd $dir && sudo $dc down"
   echo "Back up $dir/.env and $dir/secrets/ somewhere safe (offline)."
 }
 
